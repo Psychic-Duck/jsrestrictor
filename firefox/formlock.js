@@ -161,7 +161,8 @@ function click_handler(info, tab) {
 		else {
 			// Set LOCK
 			browser.tabs.sendMessage(tab.id, {"msg": "FLGetClickedForm", "url": url}).then(payload=> {
-				if (payload !== null) {					
+				if (payload !== null) {		
+					save_data();			
 					started = (new Date()).getTime();
 					// Page url and the form url
 					var first = get_root_domain(get_hostname(tab.url));

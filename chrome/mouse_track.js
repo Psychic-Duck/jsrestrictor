@@ -36,6 +36,48 @@ if ((typeof browser) === "undefined") {
 var clicked_element1 = null;
 var clicked_element2 = null;
 
+/**
+ * Saves data from storages and cookies in key-value pairs into a JSON object
+ * \todo consider saving databases etc.
+ * @returns object containing JSON with storages and cookies
+ */
+function backup_data(){
+	let cookies = {};
+	let local = {};
+	let session = {};
+	const local_keys = Object.keys(localStorage);
+	for (let key of local_keys) {
+    	local[key] = `${localStorage.getItem(key)}`;
+	}
+	const session_Keys = Object.keys(sessionStorage);
+	for (let key of session_Keys){
+		session[key] = `${sessionStorage.getItem(key)}`
+	}
+	let all_cookies = document.cookie.split(';');
+	for (let pair in all_cookies){
+		let key_val = all_cookies[pair].split("=");
+		cookies[key_val[0]] = key_val[1];
+	}
+	return ({local, session, cookies});
+}
+
+/**
+ * Restores values saved on start of lock
+ * \todo add restoration of indexdb etc.
+ * @param data JSON with data to be restored, includes storages and cookies
+ */
+function restore_data(data){
+	//Restoration of pre-lock items
+	for (let key in data.local){
+		localStorage.setItem(key, data.local[key]);
+	}
+	for (let key in data.session){
+		sessionStorage.setItem(key, data.session[key]);
+	}
+	for (let key in data.cookies){
+		document.cookie = `${key}=${data.cookies[key]};`;
+	}
+}
 // listens to mouse clicks for form selection
 document.addEventListener("mousedown", function(event) {
 	// Right click
@@ -63,8 +105,9 @@ document.addEventListener("mousedown", function(event) {
 }, true);
 
 /**
- * Listens to messages from click_handler in formlock.js and responds with
- * submit method and domain of form to be locked  
+ * Listens to messages from click_handler in formlock.js and responds either with
+ * submit method and domain of form to be locked or with stored data to be backed
+ * up
  */
 browser.runtime.onMessage.addListener(function(request, sender, sendResponse) { 
 	// Retrive the clicked form for locking
@@ -81,6 +124,14 @@ browser.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 		}
 		
 		clicked_element2 = null;
+	}
+	// Backup data before locking the form
+	else if (request.msg == "BackupStorage" && document.URL == request.url) {
+		let data = backup_data();
+		sendResponse({backup: data});
+	}
+	else if (request.msg == "RestoreStorage") {
+		restore_data(request.data);
 	}
 });
 

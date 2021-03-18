@@ -32,6 +32,7 @@
 var lock_domains = [];
 //var lockTab = null;
 var blocked = [];
+var backup = {}
 
 /**
  * Blocks request to third party domains except for the lock domains
@@ -57,35 +58,60 @@ browser.webRequest.onBeforeRequest.addListener(
 	["blocking"] 
 );
 
+var tabID = 0;
+var unlockUrl = "";
+var unlockMsg = "";
+
 /**
  * CLEARING STORAGES OF POTENTIAL LEAKS
- * @param callback function which refreshes the page
+ * This function is a modified version of the original function from Formlock.
+ * ^Remove was changed to delete as few data from other domains as possible
+ * ^Added data restoration message for the locked domain
  */
 var started = null;
-function clear_new_data(callback) {   
+function clear_new_data() {   
 	if (started !== null) {
 		browser.browsingData.remove({
-			"since": started
+			"since": started,
+			"origins": [`${unlockUrl}`]
 		  }, {
-			"appcache": true,
-			"cache": true,
+			"cacheStorage": true,
 			"cookies": true,
-			"downloads": true,
 			"fileSystems": true,
-			"formData": true,
-			"history": true,
 			"indexedDB": true,
 			"localStorage": true,
-			"pluginData": true,
-			"passwords": true,
+			"serviceWorkers": true,
 			"webSQL": true
-		  }, callback);
+		  }, () => {
+			//clearing items which cannot be cleared with origins argument
+			browser.browsingData.remove({
+				"since": started
+			}, {
+				"passwords": true,
+				"appcache": true,
+				"cache": true,
+				"downloads": true,
+				"formData": true,
+				"history": true,
+				"pluginData": true
+			}, () => {
+					browser.tabs.update(tabID, {url: unlockUrl}, (tab) => {
+						browser.tabs.sendMessage(tab.id, {"msg": "RestoreStorage", "data": backup}, (payload) =>{
+							started = null;
+							alert(unlockMsg); 
+						});
+					});
+					
+			});
+		  });
 	}
 }
 
 /**
  * (1) Process the menu clicks
- * \todo close new opened tabs? or tabs of the same domain?
+ * This function is a modified version of the original function from Formlock.
+ * ^Backup of storage and cookies from locked page was added
+ * \todo close new opened tabs? or tabs of the same domain? 
  */
 var click_handler = function(info, tab) {
 	var url = info.frameUrl ? info.frameUrl : info.pageUrl;
@@ -112,26 +138,29 @@ var click_handler = function(info, tab) {
 	// Set the lock for one domain allowed
 	if (info.menuItemId === "lock") {	
 		if (lock_domains.length > 0) {
+			//Restore saved data
 			// Remove LOCK
 			var msg = "Unlocked. Third-party requests blocked " + blocked.length + ":\n";
 			for (b in blocked) {
 				msg += get_hostname(blocked[b]) + "\n";
 			}
+			unlockMsg = msg;
 			browser.browserAction.setTitle({title: "FormLock"});
 			browser.contextMenus.update("lock", {"title": "Set LOCK"});
 			lock_domains = [];
 			blocked = [];				
 			var old_url = tab.url.split("?")[0]; 
-			browser.tabs.executeScript(tab.id, {code: "window.location.href='about:blank';"}, function(tab) {
-				var callback = function () {
-					browser.tabs.update(tab.id, {url: old_url});
-					started = null;
-					alert(msg); 
-				};
-				clear_new_data(callback);  
-			});			
+			unlockUrl = old_url;
+			
+			browser.tabs.executeScript(tab.id, {code: `window.location.href=${old_url};`}, function(tab) {
+				tabID = tab.id;
+				clear_new_data(); 
+			});
 		}
 		else {
+			browser.tabs.sendMessage(tab.id, {"msg": "BackupStorage", "url": url}, function(payload) {
+				backup = payload.backup;
+			});
 			// Set LOCK
 			browser.tabs.sendMessage(tab.id, {"msg": "FLGetClickedForm", "url": url}, function(payload) {
 				if (payload !== null) {					
@@ -175,7 +204,7 @@ browser.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 /** 
  * INTERCEPTS PAGE SCRIPTS ON A NEW URL LOADED
  * This function is a modified version of the original function from Formlock.
- * A check was added so that the scripts aren't injected into forbidden pages which would cause errors
+ * ^A check was added so that the scripts aren't injected into forbidden pages which would cause errors
  */
 browser.webNavigation.onCompleted.addListener(function(o) {
 	//Prevent needless injection attempts into irrelevant pages
